@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Self
 
@@ -57,13 +58,17 @@ class NetworkManager:
                     resp = self.session.get(url, timeout=(5, 300), stream=True, allow_redirects=True, headers=headers, verify=True)
                     resp.raise_for_status()
 
+                deadline = time.monotonic() + 300.0
                 with tmp.open("wb") as fh:
                     for chunk in resp.iter_content(chunk_size=131072):
+                        if time.monotonic() > deadline:
+                            raise NetworkError(f"Download stalled (hard timeout exceeded): {url}")
                         fh.write(chunk)
                 tmp.replace(dest)
-            except Exception:
-                tmp.unlink(missing_ok=True)
+            except req_exc.RequestException:
                 raise NetworkError(f"Download failed: {url}") from None
+            finally:
+                tmp.unlink(missing_ok=True)
 
     def gh_download(self, url: str, dest: Path) -> None:
         pr(f"Getting '{dest.name}' from '{url}'")

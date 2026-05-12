@@ -194,7 +194,7 @@ def run_build(data: dict[str, object], config: Config, net: NetworkManager, targ
         if ks_path:
             ks_path.unlink(missing_ok=True)
 
-    for tmp in TEMP_DIR.rglob("tmp.*"):
+    for tmp in TEMP_DIR.rglob("tmp*"):
         shutil.rmtree(tmp, ignore_errors=True)
 
     log_lines = [r for fut in as_completed(futures) if (r := fut.result())]

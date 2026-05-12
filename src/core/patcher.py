@@ -10,6 +10,9 @@ from src.core.config import TEMP_DIR
 from src.core.logger import pr, wpr
 from src.core.prebuilts import get_highest_ver
 
+_SECRET_PATTERNS = re.compile(r"(keystore-password=|keystore-entry-password=)\S+")
+_RE_COMMON_VERSIONS = re.compile(r"Most common compatible versions:\n(.*?)(?:\n\n|\Z)", re.DOTALL)
+_RE_VERSION_TAGS = re.compile(r"\s*\(.*?\)")
 
 class PatcherError(Exception):
     pass
@@ -23,11 +26,12 @@ def _arch_to_libs(arch: str) -> str:
         case _:
             return "arm64-v8a,armeabi-v7a"
 
-def _run_java(*args: str | Path, capture: bool = True) -> str:
-    result = subprocess.run(["java", *(str(a) for a in args)], capture_output=capture, text=True)
+def _run_java(*args: str | Path, capture: bool = True, timeout: int = 600) -> str:
+    result = subprocess.run(["java", *(str(a) for a in args)], capture_output=capture, text=True, timeout=timeout)
     combined = (result.stdout or "") + (result.stderr or "")
     if result.returncode != 0:
-        raise PatcherError(combined.strip())
+        redacted = _SECRET_PATTERNS.sub(r"\1***", combined)
+        raise PatcherError(redacted.strip())
     return combined
 
 def _parse_patch_block(output: str, patch_name: str) -> list[str]:
@@ -36,22 +40,12 @@ def _parse_patch_block(output: str, patch_name: str) -> list[str]:
     return []
 
 def _parse_versions_output(output: str) -> list[str]:
-    if m := re.search(r"Most common compatible versions:\n(.*?)(?:\n\n|\Z)", output, re.DOTALL):
-        return [re.sub(r"\s*\(.*?\)", "", v).strip() for v in m.group(1).splitlines() if v.strip()]
+    if m := _RE_COMMON_VERSIONS.search(output):
+        return [_RE_VERSION_TAGS.sub("", v).strip() for v in m.group(1).splitlines() if v.strip()]
     return []
 
 def _redact_args(args: list[str | Path]) -> list[str]:
-    redacted = []
-    for a in args:
-        s = str(a)
-        if "keystore-password=" in s or "keystore-entry-password=" in s:
-            redacted.append(f"{s.partition('=')[0]}=***")
-        elif s.startswith("--keystore="):
-            p = Path(s.partition("=")[2])
-            redacted.append(f"--keystore={p.parent.name}/{p.name}")
-        else:
-            redacted.append(s)
-    return redacted
+    return [_SECRET_PATTERNS.sub(r"\1***", str(a)) for a in args]
 
 class PatcherCLI:
     def __init__(self, cli_jar: Path, patches_mpp: Path, apksigner: Path, ks_path: Path | None = None, sig_file: Path = Path("sig.txt")) -> None:
@@ -126,12 +120,24 @@ class PatcherCLI:
         pr(" ".join(_redact_args(["java", *base_cmd, *ks_args, *patch_args])))
         try:
             _run_java(*base_cmd, *ks_args, *patch_args, capture=False)
-        except PatcherError:
+        except subprocess.TimeoutExpired:
+            msg = f"Patching '{stock_apk.name}' failed: Process timed out after 10 minutes"
+        except PatcherError as exc:
+            msg = f"Patching '{stock_apk.name}' failed:\n{exc}"
+        except Exception:
+            msg = f"Patching '{stock_apk.name}' failed due to an unexpected system error"
+        else:
+            msg = None
+        finally:
+            if tmp_files_dir.exists():
+                shutil.rmtree(tmp_files_dir, ignore_errors=True)
+
+        if msg:
             output_apk.unlink(missing_ok=True)
-            raise PatcherError(f"Patching '{stock_apk.name}' failed") from None
+            raise PatcherError(msg) from None
 
         if not output_apk.exists():
-            raise PatcherError(f"Patching '{stock_apk.name}' failed - output not created")
+            raise PatcherError(f"Patching '{stock_apk.name}' failed: Output not created")
 
     def check_signature(self, apk: Path, pkg_name: str) -> bool:
         if not (expected := self._signatures.get(pkg_name)):
@@ -147,8 +153,8 @@ class PatcherCLI:
                     with os.fdopen(fd, "wb") as out_f, zf.open(inner) as in_f:
                         shutil.copyfileobj(in_f, out_f)
                     apk = tmp_apk
-        except zipfile.BadZipFile:
-            pass
+        except zipfile.BadZipFile as exc:
+            wpr(f"Could not unpack bundle for sig check ({apk.name}): {exc}, verifying outer file")
 
         try:
             output = _run_java("--enable-native-access=ALL-UNNAMED", "-jar", self.apksigner, "verify", "--print-certs", apk)

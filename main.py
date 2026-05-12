@@ -4,6 +4,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from src.core.builder import run_build
@@ -25,7 +26,7 @@ from src.scrapers.archive import ArchiveError
 from src.scrapers.uptodown import UptodownError
 
 _KNOWN_ERRORS = (NetworkError, PrebuiltsError, PatcherError, APKMirrorError, ArchiveError, UptodownError)
-
+_shutting_down = threading.Event()
 
 def _load_dotenv(path: Path = Path(".env")) -> None:
     if not path.is_file():
@@ -84,8 +85,11 @@ def _clear() -> int:
     return 0
 
 def _sigint_handler(sig: int, frame: object) -> None:
+    if _shutting_down.is_set():
+        return
+    _shutting_down.set()
     epr("Interrupted by user")
-    for tmp in TEMP_DIR.rglob("tmp.*"):
+    for tmp in TEMP_DIR.rglob("tmp*"):
         shutil.rmtree(tmp, ignore_errors=True)
     for ks in TEMP_DIR.glob("*.keystore"):
         ks.unlink(missing_ok=True)
