@@ -68,9 +68,6 @@ class NetworkManager:
 
         raise NetworkError(f"Request failed after {len(_RETRY_DELAYS) + 1} attempts: {url}") from last_exc
 
-    def gh_get(self, url: str) -> str:
-        return self.get(url, headers=self._gh_headers)
-
     def download(self, url: str, dest: Path, headers: dict[str, str] | None = None) -> None:
         if dest.exists():
             return
@@ -109,9 +106,6 @@ class NetworkManager:
                     tmp.unlink(missing_ok=True)
 
             raise NetworkError(f"Download failed after {len(_RETRY_DELAYS) + 1} attempts: {url}") from last_exc
-
-    def gh_download(self, url: str, dest: Path) -> None:
-        self.download(url, dest, headers=self._gh_headers | {"Accept": "application/octet-stream"})
 
     def __enter__(self) -> "NetworkManager":
         return self

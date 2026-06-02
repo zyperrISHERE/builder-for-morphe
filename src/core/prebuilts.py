@@ -77,11 +77,11 @@ def _fetch_single_asset(src: str, tag: str, ver: str, fprefix: str, ext: str, cl
 
     release = None
     if ver == "dev":
-        releases = json.loads(net.get(base_url) if gitlab else net.gh_get(base_url))
+        releases = json.loads(net.get(base_url) if gitlab else net.get(base_url, headers=net._gh_headers))
         ver = get_highest_ver([r["tag_name"] for r in releases if r.get("tag_name")])
     elif ver == "latest":
         latest_url = f"{base_url}/permalink/latest" if gitlab else f"{base_url}/latest"
-        release = json.loads(net.get(latest_url) if gitlab else net.gh_get(latest_url))
+        release = json.loads(net.get(latest_url) if gitlab else net.get(latest_url, headers=net._gh_headers))
         ver = release.get("tag_name", "")
 
     if file := _find_cached(cl_dir, fprefix, ver, ext, exclude_dev=False):
@@ -97,7 +97,7 @@ def _fetch_single_asset(src: str, tag: str, ver: str, fprefix: str, ext: str, cl
 
     if release is None:
         release_url = f"{base_url}/{ver}" if gitlab else f"{base_url}/tags/{ver}"
-        release = json.loads(net.get(release_url) if gitlab else net.gh_get(release_url))
+        release = json.loads(net.get(release_url) if gitlab else net.get(release_url, headers=net._gh_headers))
 
     raw_assets = release.get("assets", {}).get("links", []) if gitlab else release.get("assets", [])
     asset = _get_target_asset(raw_assets, ext, src, ver)
@@ -111,7 +111,7 @@ def _fetch_single_asset(src: str, tag: str, ver: str, fprefix: str, ext: str, cl
     if gitlab:
         net.download(asset_url, file)
     else:
-        net.gh_download(asset_url, file)
+        net.download(asset_url, file, headers=net._gh_headers | {"Accept": "application/octet-stream"})
     tag_name = release.get("tag_name", "")
     changelog = f"> ⚙️ » {tag}: `{clean_src.split('/')[0]}/{asset['name']}`  \n"
     if tag == "Patches" and tag_name:
