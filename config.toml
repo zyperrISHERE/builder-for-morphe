@@ -78,7 +78,8 @@ github-dlurl = "https://github.com/krvstek/uni-storage/releases/tag/instagram"
 arch = "arm64-v8a"
 
 [Instagram.patches]
-"github:crimera/piko" = []
+"github:crimera/piko" = { version = "dev" }
+
 
 [AdGuard_hoo-dles]
 enabled = false
